@@ -1,0 +1,108 @@
+% Fissiamo un numero di step per evitare grounding infinito.
+#const max_steps = 10.
+#const max_distance_per_day = 20. % max km 
+
+% Fatti
+step(0..max_steps).
+nodo(a;b;c;d;e).
+lunghezza(a, b, 2, soft).
+lunghezza(b, c, 2, soft).
+lunghezza(c, a, 1, medium).
+lunghezza(a, d, 1, medium).
+lunghezza(b, d, 1, hard).
+lunghezza(b, e, 1, hard).
+lunghezza(a, e, 1, hard).
+lunghezza(c, e, 1, soft).
+
+giorno(1).
+
+% Definiamo il grafo simmetrico con le lunghezze percepite dal ciclista
+arco(X, Y, C, soft) :- lunghezza(X, Y, C, soft).
+arco(Y, X, C, soft) :- lunghezza(X, Y, C, soft).
+
+arco(X, Y, C*2, medium) :- lunghezza(X, Y, C, medium).
+arco(Y, X, C*2, medium) :- lunghezza(X, Y, C, medium).
+
+arco(X, Y, C*5, hard) :- lunghezza(X, Y, C, hard).
+arco(Y, X, 0, slope) :- lunghezza(X, Y, C, hard). % strada hard in discesa
+
+%%%%%%%%% Regole e vincoli
+
+% Per ogni giorno si può avere un solo nodo di partenza
+1 { start(X, D) : nodo(X) } 1 :- giorno(D).
+
+% Allo step 0 del giorno 1 si inizializza il percorso del ciclista  
+1 { visited(X, Y, 0, 1) : arco(X, Y, _, _) } 1 :- start(X, 1).
+
+% A ogni step seguente si visita al più un arco che dipende da quello scelto
+% allo step precedente, formando un path.
+0 { visited(X, Y, I, D) : arco(X, Y, _, _) } 1 :- step(I), step(I-1), giorno(D), visited(_, X, I-1, D).
+
+
+% Calcoliamo la distanza totale percorsa in un giorno
+
+% Caso base: inizializziamo la distanza al giorno 1, step 0 con la lunghezza del primo arco visitato
+cumulative_distance(0, 1, C) :- visited(X, Y, 0, 1), arco(X, Y, C, _).
+
+% Il ciclista ha visitato l'arco (X,Y) allo step I, che non è l'ultimo step della giornata,
+% e viene sommata la sua lunghezza alla distanza totale calcolata fino allo step precedente
+cumulative_distance(I, D, Total + C) :- visited(X, Y, I, D), 
+                                        visited(_, _, I-1, D), 
+                                        cumulative_distance(I-1, D, Total), 
+                                        arco(X, Y, C, _).
+
+% Quando si passa al giorno successivo si resetta la distanza ponendola uguale alla lunghezza del primo arco visitato
+cumulative_distance(I+1, D+1, C) :- last_step(I, D), visited(X, Y, I+1, D+1),arco(X, Y, C, _).
+
+% Archi che devono essere visitati nel giorno seguente perché il ciclista ha completato
+% il percorso giornaliero (è tornato al punto di partenza) e non ha abbastanza km per visitare
+% altre strade
+valid_arc(X, Y, I, D+1, C) :- 
+    step(I), cumulative_distance(I-1, D, Total), arco(X, Y, C, _),
+    Total + C > max_distance_per_day, start(Node, D),
+    visited(_, Node, I-1, D).
+
+% Visita un solo arco il giorno dopo
+0 { visited(X, Y, I, D+1) : valid_arc(X, Y, I, D+1, C) } 1.
+
+giorno(D) :- visited(_, _, _, D).
+
+
+% check(X, Y) è vero se un arco tra (X, Y) o (Y, X) è stato percorso
+check(X, Y) :- visited(X, Y, _, _).
+check(X, Y) :- visited(Y, X, _, _).
+
+% Tutti gli archi devono essere visitati
+:- arco(X, Y, _, _), not check(X, Y).
+% Tutti gli archi hard (cioè, in salita) devono essere visitati
+:- arco(X, Y, _, hard), not visited(X, Y, _, _).
+
+% Identifica l'ultimo step
+last_step(I) :- step(I), not visited(_, _, I+1, _), visited(_, _, I, _).
+% Traccio l'ultimo step di un giorno D
+last_step(I, D) :- step(I), not visited(_, _, I+1, D), visited(_, _, I, D).
+
+
+% Il nodo di partenza del giorno successivo deve coincidere con lo starting node di quel giorno
+:- last_step(I, D), start(Y, D+1), not visited(Y, _, I+1, D+1).
+
+% Il nodo finale di un giorno deve coincidere con il nodo di partenza di quel giorno
+:- last_step(I, D), start(X, D), not visited(_, X, I, D).
+
+% Non si possono avere archi visitati in uno stesso step in giorni diversi
+:- step(I), visited(_, _, I, D), visited(_, _, I, D1), D != D1.
+
+% La distanza percorsa in una giornata non può superare il massimo
+:- giorno(D), cumulative_distance(_, D, T), T > max_distance_per_day.
+
+% Minimizzare i costi per evitare x->y->x->y 
+% Priorità maggiore con @2 deve essere data alla minimizzazione dei giorni
+%#minimize { C@1, X, Y : visited(X, Y, _, _), arco(X, Y, C, _) }.
+
+% Minimizzare il numero di giorni necessari per visitare il paese
+#minimize { 1@2, D : visited(_, _, _, D) }.
+
+#show cumulative_distance/3.
+#show visited/4.
+#show start/2.
+#show last_step/2.
